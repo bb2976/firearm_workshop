@@ -1,2 +1,4 @@
 # The Promise and Pitfalls of Spatial Epidemiology in Firearm Violence Research
- Workshop at the 2024 National Research Conference for the Prevention of Firearm-Related Harms
+
+## 1. Overview
+This repository contains an introductory demonstration to using geospatial analyses of fireamr injury data in R. This demonstration will walk you through downloading data, merging in firearm data, data exploration, and conducting an analysis will publicly available data.
