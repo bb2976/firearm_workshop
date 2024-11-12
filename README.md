@@ -3,7 +3,7 @@
 
 ## 1. Overview 
 
-This repository contains a demonstration for using R/RStudio with firearm violence data as part of "The Promise and Pitfalls of Spatial Epidemiology in Firearm Violence Research"" Workshop at the 2024 National Research Conference for the Prevention of Firearm-Related Harms.
+This repository contains a demonstration for using R/RStudio with firearm violence data as part of "The Promise and Pitfalls of Spatial Epidemiology in Firearm Violence Research" Workshop at the 2024 National Research Conference for the Prevention of Firearm-Related Harms.
 
 
 ## 2. Repository Structure
