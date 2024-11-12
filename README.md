@@ -28,14 +28,14 @@ We used these data sources for the demo:
 
 You will need the following software and R packages to complete the demo.
 
-### 4.1 Software
+### 4.1. Software
 
 Download the following software:
 
 -   [R](https://cran.r-project.org/bin/windows/base/)
 -   [RStudio](https://www.rstudio.com/products/rstudio/download/#download) or another R graphical user interface
 
-### 4.2 R packages
+### 4.2. R packages
 
 1.  Run the following code in R to install the following packages:
 
@@ -56,7 +56,7 @@ Download the following software:
     -   *`spdep`:* 1.3-3
     -   *`INLA`:* 24.05.10
 
-### 4.3 Data
+### 4.3. Data
 To download the data, refer to our code: `spatial_epi_firearm_conference.Rmd`
 
 ## 5. Cloning this Repository with RStudio
