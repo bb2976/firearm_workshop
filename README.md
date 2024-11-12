@@ -57,7 +57,7 @@ Download the following software:
     -   *`INLA`:* 24.05.10
 
 ### 4.3 Data
-To download the data, refer to our code: `spatial_epi_firearm_conference.Rmd.Rmd`
+To download the data, refer to our code: `spatial_epi_firearm_conference.Rmd`
 
 ## 5. Cloning this Repository with RStudio
 
