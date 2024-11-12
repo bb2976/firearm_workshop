@@ -274,7 +274,7 @@ moran_test <- moran.test(spatial_data$shootings, lw) # Conduct test
 print(moran_test) # View results
 
 # With a value greater than 0, we see that similar values are clustered together in space
-# There are most likley clusters in our data
+# There are most likely clusters in our data
 
 # Now, we need to determine where the clusters are - use the local Moran's I
 # Local Moran's I for clustering
