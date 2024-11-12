@@ -1,0 +1,432 @@
+---
+title: "The Promise and Pitfalls of Spatial Epidemiology in Firearm Violence Research"
+output: html_document
+date: "2024-12-09"
+---
+
+# 1. Setup
+## 1.1. Install packages
+
+First, please install any of the following packages required for this tutorial if you do not already have them installed.
+```{r install_packages, eval = FALSE}
+# Spatial packages
+install.packages("sf")
+install.packages("spdep")
+# The INLA package is not listed on the CRAN repository and must be manually installed using this code:
+install.packages("INLA",repos=c(getOption("repos"),INLA="https://inla.r-inla-download.org/R/stable"), dep=TRUE)
+
+# Data management
+install.packages("tidyverse")
+install.packages("janitor")
+install.packages("viridis")
+install.packages("lubridate")
+
+```
+
+## 1.2. Load packages
+
+Load the packages that we will use in the tutorial. These packages give us functions to help with the following:
+
+- `sf`: working with and mapping spatial data
+- `sdpep`: spatial data analysis
+- `INLA`: Bayesian inference
+- `tidyverse`: data wrangling
+- `janitor`: data cleaning
+- `viridis`: color palette to improve readability for folks with color vision deficiency
+- `lubridate`: date manipulation
+
+```{r load_packages, message = FALSE}
+# Spatial packages
+library(sf)
+library(spdep)
+library(INLA)
+
+# Data management
+library(tidyverse)
+library(janitor)
+library(viridis)
+library(lubridate)
+
+```
+
+## 1.3. Set Root Directory
+
+This code is needed so that the relative paths used in the data importing later in this code can be the same when running the code individually and knitting this RMarkdown file.
+```{r setup_path}
+knitr::opts_knit$set(root.dir = ".")
+
+```
+
+# 2. Import & prepare data
+
+Before starting our analysis, we need to bring in and prepare our data. In this analysis we will be looking at the association between the Heat Vulnerability Index (HVI) and shootings in Brooklyn, NY using publicly available data. The HVI is available at the ZIP code level, meaning that our units of analysis will be ZIP codes in Brooklyn. We need to prepare our data so that we have the number of shooting incidents for each ZIP code and its HVI score. The HVI is available for NYC ZIP codes for the year 2017, so the rest of the data will be filtered to maintain the same study period.
+
+## 2.1. Import data 
+
+We will be importing both tabular and spatial data. The tabular data contain coordinates (latitude and longitude) for points that we can use to create spatial data, or contain a linking variable that will be used to join them to spatial data.
+
+We will use the `sf::st_read()` function to import spatial data files into R. You can see that the file imported is a "simple feature" (sf), which is a spatial data format in R.
+
+The shooting incident data and HVI data are saved as CSV files. We will use the `readr::read_csv()` function to import these tabular data.
+
+As we import data, we will also clean and prepare them for our analysis.
+```{r import_data}
+# Import NYC borough boundaries spatial data
+boroughs <- st_read("Data/Borough Boundaries/geo_export_c9e24719-8fdb-47dc-bbec-784e93bac695.shp")
+
+# Import national ZIP codes spatial data
+zipcodes <- st_read("Data/tl_2020_us_zcta520/tl_2020_us_zcta520.shp")
+
+# Import shooting incidents tabular data
+shootings_2017 <- read_csv("Data/NYPD_Shooting_Incident_Data__Historic__20241002.csv") %>%
+  clean_names(.) %>% # Clean variable names for easier manipulation in R
+  mutate(year=year(mdy(occur_date))) %>% # Create a year variable to filter data for study period
+  filter(year==2017) # Limit data to study period
+
+# Import HVI tabular data
+hvi <- read_csv("Data/Heat_Vulnerability_Index_Rankings_20241002.csv") %>%
+  clean_names(.) %>% # Clean variable names for easier manipulation
+  rename(zcta=zip_code_tabulation_area_zcta_2020,
+         hvi=heat_vulnerability_index_hvi) %>% # Rename variables for easier manipulation
+  mutate(zcta=as.character(zcta)) # Convert `zcta` variable to character class - needed for joining to spatial data
+
+```
+
+## 2.2. Prepare data
+
+### 2.2.1. Brooklyn ZIP codes
+
+ZIP code polygons are available from the US Census Bureau at the national level. We want to select only the ZIP codes that are located in Brooklyn. We will do this by taking the centroid (geographic center of each ZIP code polygon) and comparing it the polygon of Brooklyn. Any centroid that is within the Brooklyn polygon will be kept for our analysis. 
+
+#### ... Transform CRS
+
+Before we calculate the centroids, an important step is to make sure that the spatial data we have are in the same Coordinate Reference System (CRS). These are related to map projections - a way to transform the earth from its spherical (3D) shape to a planar (2D) shape. A CRS defines how the 2D, projected map as part of spatial data relates to real places on earth. Since there are many different CRS's, we need to make sure that when we compare spatial data that they are projected in the same CRS. Otherwise, there will be misalignment of our spatial data. We can check a simple feature's CRS in R by using the `sf::st_crs()` function.
+```{r brooklyn_crs}
+# Filter the NYC boroughs spatial data to get the polygon for Brooklyn
+brooklyn <- boroughs %>%
+  filter(boro_name == "Brooklyn")
+
+# Compare CRS
+# Check the CRS for Brooklyn
+st_crs(brooklyn)
+# We can see that the CRS for the `brooklyn` sf object is WGS84
+
+# Check CRS for ZIP codes
+st_crs(zipcodes)
+# We can see that the CRS for the `zipcodes` sf object is NAD83
+
+# We can transform an sf object to a different CRS so that we can manipulate both sets of spatial data together
+# In this case, we'll transform the `brooklyn` sf object to the same CRS as the `zipcodes` sf object
+# To do this, we'll use the `sf::st_transform` function. We'll also use the `st_crs` function to get the CRS from the `zipcodes` sf object.
+brooklyn <- st_transform(brooklyn, 
+                             st_crs(zipcodes))
+
+# Now check the CRS for `brooklyn` and we can see it is now NAD83
+st_crs(brooklyn)
+
+```
+
+#### ... Calculate ZIP code centroids & filter
+
+Now that both sf objects that we want to work with are projected into the same CRS, we can calculate the ZIP code centroids and compare them to the Brooklyn polygon. The `sf::st_centroid` function calculates the centroids of polygons, which results in an sf object that contains the points for each ZIP code centroid.
+
+Once these are calculated, we can use the `sf::st_within` function to see which centroids are spatially located completely within the Brooklyn polygon. After we complete this, we can compare the included centroids to the full list of ZIP codes. Based on this, we can filter our ZIP code data to only contain Brooklyn polygons.
+```{r zip_centroids}
+# Calculate the centroids of each ZIP code
+zipcodes_centroids <- st_centroid(zipcodes)
+
+# Check which centroids are within Brooklyn
+centroids_in_brooklyn <- st_within(zipcodes_centroids, # Point data to check
+                                       brooklyn) # Polygons to compare to point data
+
+# Filter the ZIP codes where the centroid is in Brooklyn
+brooklyn_zipcodes <- zipcodes[lengths(centroids_in_brooklyn) > 0, ] # Removes any ZIP code centroids not contained in the Brooklyn polygon
+# This is our final list of Brooklyn ZIP codes
+
+```
+
+#### ... Visualize ZIP codes
+
+Now that we have our ZIP codes of interest, we can plot our spatial data. There are many packages dedicated to visualizing data in R. We will use the ggplot2 package that is included with the tidyverse package.
+```{r visualize_zips}
+# Create Brooklyn ZIP code plot
+ggplot() +
+  geom_sf(data = brooklyn, fill = "darkblue") + # Plot the Brooklyn polygon boundary with a dark blue color
+  geom_sf(data = brooklyn_zipcodes, fill = "lightblue") + # Plot the Brooklyn ZIP codes with a light blue color
+  labs(title = "ZIP Codes in Brooklyn") # Add a title to the plot
+
+```
+
+### 2.2.2. Shooting incidents data
+
+Like the previous step with ZIP codes, we need to convert the shooting incidents data to spatial data, transform the CRS so that we can join them to our prepared ZIP codes, and then determine the number of shooting incidents per ZIP code in 2017. 
+
+We will use the `sf::st_as_sf()` function to take the coordinates of each shooting incident location and convert it into a spatial data point. The `coords` option lets us specify which columns in the tabular data contain the longitude and latitude for each point. The `crs` option lets us specify the CRS for the coordinates. In this case, our downloaded data was provided in the WGS84 projection. The number 4326 is the unique identifier for this CRS.
+
+The `sf::st_join` function performs a spatial join operation. All shooting incident points that intersect a ZIP code polygon will be assigned to that ZIP code. Any point that falls outside of our polygons will be excluded from the join.
+
+We can then summarize our data and count the number of points within each polygon.
+```{r shooting_data}
+# Convert shooting incidents to spatial data using provided coordinates
+shootings_2017_sf <- st_as_sf(shootings_2017, 
+                                  coords = c("longitude", "latitude"),
+                                  crs = 4326)
+# Transform the CRS
+# We can use the st_crs() function again to ensure the CRS matches our other data
+shootings_2017_sf <- st_transform(shootings_2017_sf,
+                                  st_crs(brooklyn_zipcodes))
+
+# Perform a spatial join - shooting incident points to ZIP code polygons
+shootings_with_zip <- st_join(shootings_2017_sf, # Point data to join
+                                  brooklyn_zipcodes, # Polygon data for joining
+                                  join = st_within) # Join type - points must be within our polygons to join
+
+# We will now count the number of shooting incident points in each ZIP code polygon
+# Summarize shootings by ZIP code
+shootings_by_zip <- shootings_with_zip %>%
+  group_by(ZCTA5CE20) %>% # Create a group for each unique ZIP code
+  summarize(shootings = n()) # Create a new column called 'shootings' containing a count of points per polygon group
+
+# Merge shooting counts with Brooklyn ZIP code polygons
+# Now that we know how many points are in each polygon, we can merge our two dataframes together
+brooklyn_zipcodes_shootings <- brooklyn_zipcodes %>%
+  left_join(as.data.frame(shootings_by_zip), # The `left_join()` function does not work with 2 sets of spatial data, so we convert shootings to a dataframe
+                   by = "ZCTA5CE20") %>%
+  # The column relating both dataframes. If the column names do not match, it must be specified in the code (i.e., by = c("var1", "var2"))
+  replace(is.na(.), 0) %>% # For any ZIP codes with 0 shooting incidents, replace NA with 0
+  rename(zcta = ZCTA5CE20) # Rename ZIP code variable for easier manipulation
+
+```
+
+### 2.2.3. HVI data
+
+We now have our outcome data - the count of shooting incidents per ZIP code. Now, we need to join our exposure (the Heat Vulnerability Index) to these data. Like merging our shooting incidents and ZIP codes above, we will repeat a similar process to merge HVI data to our ZIP codes using the `left_join()` function. Once complete, we will have our final dataset prepared for analysis.
+```{r join_hvi}
+# Join Brooklyn shootings data with HVI data
+spatial_data <- brooklyn_zipcodes_shootings %>%
+  left_join(hvi, by = "zcta") %>%
+  mutate(id = row_number()) # Create an ID variable based on row number
+
+# R-INLA requires the ID variable to be consecutive from 1 to N
+# Using row numbers allows us to create an ID variable that will work with R-INLA
+
+```
+
+## 2.3. Data visualization
+With our analytic dataset complete, we can now visualize the data. 
+
+### 2.3.1. Histograms
+Our first step is to create histograms of our exposure (HVI) and outcome (shooting incidents). The ggplot2 package contains the `geom_histogram()` function to do this.
+```{r histograms}
+# Histogram for exposure
+hist_hvi <- ggplot(spatial_data) + # Dataframe with data of interest
+  geom_histogram(aes(x = hvi)) + # Specify the column to plot
+  labs(title = "Heat Vulnerability Index, Brooklyn 2017", # Create a title for the plot
+       x = "HVI", # Label the x-axis
+       y = "Count") # Label the y-axis
+# View plot
+hist_hvi
+
+# Histogram for outcome
+hist_shoot <- ggplot(spatial_data) +
+  geom_histogram(aes(x = shootings)) +
+  labs(title = "Observed Shootings, Brooklyn 2017",
+       x = "Shootings",
+       y = "Count")
+# View plot
+hist_shoot
+
+```
+
+### 2.3.2. Spatial plots & testing
+
+From the histograms, it looks like we have good variation. However, let's visualize the data spatially and test for clustering of the outcome.
+
+#### ... Spatial visualization
+
+Before testing for clustering in our data, let's plot the number of shootings per ZIP code to visualize the data.
+```{r spatial_plot}
+# Create plot
+plot_shoot <- ggplot(spatial_data) +
+  geom_sf(aes(fill = shootings)) + # Create chloropleth map of shooting incidents
+  scale_fill_viridis_c() + # Improve plot readability
+  labs(title = "Observed Shootings, Brooklyn 2017", fill = "Shootings") # Add title and labels
+
+# View plot
+plot_shoot
+
+```
+
+#### ... Clustering
+
+Now, let's test for clustering of shooting incidents. Before we conduct a test for clustering, we need to create a spatial weights matrix. We first need to create a list of polygon neighbors - ZIP codes that share one or more boundary points - using the `spdep::poly2nb()` function. Once we have a list of neighboring polygons, we will be able to create a spatial weights matrix. Since near things are more related than distant things, we need to take this into account when performing any type of spatial analysis. The `spdep::nb2listw()` function will calculate spatial weights from our polygon neighbors.
+
+Then, we will conduct a Moran's I test for global spatial autocorrelation. Moran's I will output a score between -1 and 1: -1 indicating total dispersion, 0 indicating random, and 1 indicating total clustering. We will use the `spdep::moran.test()` function to calculate the Moran's I for shooting incidents.
+
+If the global Moran's I indicates the presence of clustering, we will conduct a local Moran's I test. The local Moran's I can help us identify spatial clusters of shooting incidents with either high or low values. The function `spdep::localmoran()` calculates the local Moran's I. A positive value for the local Moran's I indicates that a ZIP code polygon has neighboring polygons with similarly high or low attribute values; this indicates that the polygon is part of a cluster. A negative value for the local Moran's I indicates that a polygon has neighboring polygons with dissimilar values; this indicates that the polygon is an outlier.
+```{r morans_i}
+# Create polygon neighbors list and their spatial weights matrix
+nb <- poly2nb(spatial_data, row.names=spatial_data$id, queen=TRUE)  # Neighbors list based on ZIP code boundaries
+lw <- nb2listw(nb, style = "W")  # Spatial weights list
+
+# Moran's I test for global spatial autocorrelation
+moran_test <- moran.test(spatial_data$shootings, lw) # Conduct test
+print(moran_test) # View results
+
+# With a value greater than 0, we see that similar values are clustered together in space
+# There are most likley clusters in our data
+
+# Now, we need to determine where the clusters are - use the local Moran's I
+# Local Moran's I for clustering
+local_moran <- localmoran(spatial_data$shootings, lw) # Conduct test
+spatial_data$local_moran <- local_moran[,1]  # Add the results to our spatial data
+
+# Once we have the local Moran's I values we can plot them and visualize our clusters
+# Plot the local Moran's I clusters
+ggplot(data = spatial_data) +
+  geom_sf(aes(fill = local_moran)) +
+  scale_fill_viridis_c() +
+  labs(title = "Local Moran's I - Shooting Incidents", fill = "Moran's I")
+
+# We can see that in the eastern part of Brooklyn, there is indication of a cluster of ZIP codes with similar counts of shooting incidents
+
+```
+
+# 3. Bayesian inference with INLA
+
+With a good idea of what our data look like, we can proceed with our analysis. We also know from previous steps that we need to account for the spatial autocorrelation of our data. We will use the R-INLA package to create a spatial model investigating the association between HVI and shooting incidents.
+
+## 3.1. Create model
+
+Before we run the analytic model, we need to create a spatial adjacency matrix. Similar to our cluster detection above, the INLA model will need to know how near each of our polygons are to each other. We will use the `spdep::nb2mat()` function for this. Once the adjacency matrix is ready, we will create our formula and run the model using the `inla::inla()` function.
+```{r inla_model}
+# Set up the spatial adjacency matrix
+adjacency <- nb2mat(nb, # Use the previously created polygon neighbors list
+                    style = "B", # Basic binary coding to create matrix (1 = neighbor; 0 = non-neighbor)
+                    zero.policy = TRUE) # Permit the weights list to be formed with zero-length weights vectors
+
+# Model: Shootings as outcome, HVI as predictor, controlling for spatial dependencies
+# Specify formula
+formula <- shootings ~ hvi + f(id, # Use the consecutive IDs created earlier
+                               model = "besag", # Use the Besag model for spatial effects
+                               graph = adjacency) # Use the adjacency matrix we just created
+
+# Run the INLA model
+result <- inla(formula, # Use the formula we specified above
+               data = as.data.frame(spatial_data), # Use data from the `spatial_data` dataframe
+               family = "poisson") # Since we have count data, use a Poisson statistical model
+
+# Print the results
+inla_result <- summary(result)
+inla_result
+
+```
+
+## 3.2. Get IRR & credible interval
+
+For easier interpretation, we can get the Incidence Rate Ratio (IRR) from our model along with the credible interval.
+```{r inla_irr}
+# Get the IRR and credible interval
+hvi_irr <- round(exp(inla_result$fixed[2, "mean"]),2) # IRR
+hvi_quantiles <- inla_result$fixed[2, c("0.025quant", "0.975quant")]
+hvi_ci_lower <- round(exp(hvi_quantiles[1]),2)  # Lower bound
+hvi_ci_upper <- round(exp(hvi_quantiles[2]),2)  # Upper bound
+
+# Print the IRR and credible interval
+# Create a dataframe to hold our calculated values from above
+irr_df_inla <- data.frame(
+  Variable = "HVI",
+  IRR = hvi_irr,
+  CrI_Lower = hvi_ci_lower,
+  CrI_Upper = hvi_ci_upper
+)
+
+# Print results
+rownames(irr_df_inla) <- NULL
+print(irr_df_inla)
+
+
+```
+
+## 3.3. Visualize results
+We can now visualize the results that we just calculated.
+
+```{r inla_visualize}
+# Create plot of INLA results
+# Create a new column in a spatial data that takes on the predicted number of incidents from our INLA model
+spatial_data$pred_shootings <- result$summary.fitted.values[, "mean"]
+
+# Plot the results
+inla_plot <- ggplot(spatial_data) +
+  geom_sf(aes(fill = pred_shootings)) +
+  scale_fill_viridis_c() +
+  labs(title = "Predicted Shooting Incidents from R-INLA", fill = "Shootings")
+
+# View plot
+inla_plot
+
+```
+
+## 3.4. Residuals
+
+To check the fit of our data, we can calculate and visualize the residuals. These will help us assess the quality of the model we created by measuring the difference between observed and predicted values for shooting incidents. Then, we can test for spatial autocorrelation in our residuals. This will help to identify model misspecifications and improve the model's predictive accuracy. We will use the Moran's I test again to assess any spatial autocorrelation in the residuals.
+```{r inla_residuals}
+# Calculate residuals
+spatial_data$residuals <- spatial_data$shootings - spatial_data$pred_shootings # Subtract predicted values from observed
+
+# Plot residuals
+ggplot(spatial_data) +
+  geom_sf(aes(fill = residuals)) +
+  scale_fill_viridis_c() +
+  labs(title = "Residuals of Poisson Spatial Model", fill = "Residuals")
+
+# Test for spatial autocorrelation
+residual_moran <- moran.test(spatial_data$residuals, lw)
+print(residual_moran)
+
+```
+
+# 4. Compare with non-spatial model
+
+Finally, let's compare our results with a non-spatial model. In this case, we will run the same analysis using a Poisson regression without accounting for spatial autocorrelation.
+```{r non_spatial_test}
+# Create Poisson model
+model <- glm(shootings ~ hvi, 
+             family="poisson", 
+             data=spatial_data)
+
+# View results
+summary(model)
+
+# Get the IRR and confidence interval
+# Calculate IRR & CI
+hvi_irr_nonsp <- round(exp(coef(model)["hvi"]),2) # IRR
+hvi_conf_int <- round(exp(confint(model)["hvi", ]),2)  # Lower bound
+
+# Create dataframe to store calculations
+irr_df <- data.frame(
+  Variable = "HVI",
+  IRR = hvi_irr_nonsp,
+  CI_Lower = hvi_conf_int[1],
+  CI_Upper = hvi_conf_int[2]
+)
+
+# View results
+rownames(irr_df) <- NULL
+print(irr_df)
+
+# Compare results
+# Print INLA results again
+print(irr_df_inla)
+
+# We can see that accounting for spatial autocorrelation attenuates our results. For this analysis, a non-spatial model overestimates the effect of HVI on shooting incidents.
+
+```
+
+# 5. Additional resources
+
+In case you would like to learn more about geocomputation or the R-INLA package, here are some additional resources:
+
+- [Geocomputation with R (free online book)](https://r.geocompx.org/)
+- [R-INLA (documentation and resources for the R-INLA package)](https://www.r-inla.org/)
+- [Bayesian inference with INLA (free online book)](https://becarioprecario.bitbucket.io/inla-gitbook/)
