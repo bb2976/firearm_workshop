@@ -28,7 +28,7 @@ install.packages("lubridate")
 Load the packages that we will use in the tutorial. These packages give us functions to help with the following:
 
 - `sf`: working with and mapping spatial data
-- `sdpep`: spatial data analysis
+- `spdep`: spatial data analysis
 - `INLA`: Bayesian inference
 - `tidyverse`: data wrangling
 - `janitor`: data cleaning
@@ -248,7 +248,7 @@ Before testing for clustering in our data, let's plot the number of shootings pe
 ```{r spatial_plot}
 # Create plot
 plot_shoot <- ggplot(spatial_data) +
-  geom_sf(aes(fill = shootings)) + # Create chloropleth map of shooting incidents
+  geom_sf(aes(fill = shootings)) + # Create choropleth map of shooting incidents
   scale_fill_viridis_c() + # Improve plot readability
   labs(title = "Observed Shootings, Brooklyn 2017", fill = "Shootings") # Add title and labels
 
@@ -268,6 +268,13 @@ If the global Moran's I indicates the presence of clustering, we will conduct a 
 # Create polygon neighbors list and their spatial weights matrix
 nb <- poly2nb(spatial_data, row.names=spatial_data$id, queen=TRUE)  # Neighbors list based on ZIP code boundaries
 lw <- nb2listw(nb, style = "W")  # Spatial weights list
+
+# Visualize the spatial adjacency matrix
+matrix_data <- as_Spatial(spatial_data) # Convert to Spatial* object for plotting
+coords <- coordinates(matrix_data) # Get coordinates from ZIP code polygons
+# Plot
+plot(matrix_data, main = "Spatial Adjacency Matrix - Brooklyn ZIP Codes") # Plot ZIP code polygons
+plot(nb, coords, add = TRUE, col = "blue") # Add spatial adjacency matrix
 
 # Moran's I test for global spatial autocorrelation
 moran_test <- moran.test(spatial_data$shootings, lw) # Conduct test
@@ -349,8 +356,8 @@ print(irr_df_inla)
 ```
 
 ## 3.3. Visualize results
-We can now visualize the results that we just calculated.
 
+We can now visualize the results that we just calculated.
 ```{r inla_visualize}
 # Create plot of INLA results
 # Create a new column in a spatial data that takes on the predicted number of incidents from our INLA model

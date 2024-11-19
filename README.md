@@ -3,7 +3,7 @@
 
 ## 1. Overview 
 
-This repository contains a demonstration for using R/RStudio with firearm violence data as part of "The Promise and Pitfalls of Spatial Epidemiology in Firearm Violence Research" Workshop at the 2024 National Research Conference for the Prevention of Firearm-Related Harms.
+This repository contains a demonstration for using R/RStudio with firearm violence data as part of "The Promise and Pitfalls of Spatial Epidemiology in Firearm Violence Research" Workshop presented by the [GAPS Lab](www.thegapslab.org) at the 2024 National Research Conference for the Prevention of Firearm-Related Harms.
 
 
 ## 2. Repository Structure
@@ -37,7 +37,7 @@ Download the following software:
 
 ### 4.2. R packages
 
-1.  Run the following code in R to install the following packages:
+1.  Run the following code in R to install the necessary packages:
 
 `install.packages(c('tidyverse','janitor','viridis','lubridate','sf','spdep'), dependencies = TRUE)`
 `install.packages("INLA",repos=c(getOption("repos"),INLA="https://inla.r-inla-download.org/R/stable"), dep=TRUE)`
