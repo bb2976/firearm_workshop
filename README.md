@@ -3,7 +3,7 @@
 
 ## 1. Overview 
 
-This repository contains a demonstration for using R/RStudio with firearm violence data as part of "The Promise and Pitfalls of Spatial Epidemiology in Firearm Violence Research" Workshop presented by the [GAPS Lab](www.thegapslab.org) at the 2024 National Research Conference for the Prevention of Firearm-Related Harms.
+This repository contains a demonstration for using R/RStudio with firearm violence data as part of "The Promise and Pitfalls of Spatial Epidemiology in Firearm Violence Research" Workshop presented by the [GAPS Lab](https://www.thegapslab.org) at the 2024 National Research Conference for the Prevention of Firearm-Related Harms.
 
 
 ## 2. Repository Structure
